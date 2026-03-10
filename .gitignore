@@ -1,0 +1,25 @@
+# Terraform state & sensitive files
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan
+*.tfvars
+!example.tfvars
+
+# Override files (local-only)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Generated files
+.terraform.tfstate.lock.info
+
+# macOS
+.DS_Store

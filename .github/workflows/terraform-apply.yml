@@ -1,0 +1,74 @@
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-*.yml"
+
+  # Allow manual trigger (e.g. first deploy, forced re-apply)
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'apply' to confirm"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    name: terraform apply
+    runs-on: ubuntu-latest
+
+    # Guard manual trigger — require explicit confirmation
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'apply')
+
+    environment:
+      name: production  # requires manual approval in GitHub environment settings
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-2' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+
+      - name: Substitute backend name_suffix
+        run: sed -i "s/YOURSUFFIX/${{ secrets.NAME_SUFFIX }}/g" main.tf
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: |
+          terraform apply \
+            -var="my_ip=${{ secrets.OPERATOR_IP }}" \
+            -var="project_name=${{ vars.PROJECT_NAME || 'openclaw' }}" \
+            -var="name_suffix=${{ secrets.NAME_SUFFIX }}" \
+            -var="key_name=${{ secrets.EC2_KEY_NAME }}" \
+            -var="domain=${{ secrets.OPENCLAW_DOMAIN }}" \
+            -var="hosted_zone_name=${{ secrets.HOSTED_ZONE_NAME }}" \
+            -var="budget_alert_email=${{ secrets.BUDGET_ALERT_EMAIL }}" \
+            -auto-approve \
+            -no-color
+
+      - name: Print outputs
+        run: terraform output

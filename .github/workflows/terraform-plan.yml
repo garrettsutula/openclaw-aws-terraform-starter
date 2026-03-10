@@ -1,0 +1,164 @@
+name: Terraform Plan
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-*.yml"
+
+permissions:
+  contents: read
+  pull-requests: write  # to post plan as PR comment
+
+jobs:
+  plan:
+    name: terraform plan
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-2' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      - name: Substitute backend name_suffix
+        run: sed -i "s/YOURSUFFIX/${{ secrets.NAME_SUFFIX }}/g" main.tf
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var="my_ip=${{ secrets.OPERATOR_IP }}" \
+            -var="project_name=${{ vars.PROJECT_NAME || 'openclaw' }}" \
+            -var="name_suffix=${{ secrets.NAME_SUFFIX }}" \
+            -var="key_name=${{ secrets.EC2_KEY_NAME }}" \
+            -var="domain=${{ secrets.OPENCLAW_DOMAIN }}" \
+            -var="hosted_zone_name=${{ secrets.HOSTED_ZONE_NAME }}" \
+            -var="budget_alert_email=${{ secrets.BUDGET_ALERT_EMAIL }}" \
+            -no-color \
+            -out=tfplan 2>&1 | tee plan.txt
+        continue-on-error: true
+
+      - name: Parse resource changes
+        id: changes
+        if: always()
+        run: |
+          # Parse plan JSON — safe even if tfplan doesn't exist or has no changes
+          if [ -f tfplan ]; then
+            terraform show -json tfplan 2>/dev/null | jq -r '
+              (.resource_changes // [])[] |
+              select(.change.actions != ["no-op"]) |
+              if .change.actions == ["create"] then
+                "✨ New | `\(.type)` | `\(.name)`"
+              elif .change.actions == ["delete"] then
+                "💣 Destroy | `\(.type)` | `\(.name)`"
+              elif (.change.actions | (contains(["delete"]) and contains(["create"]))) then
+                "💣✨ Replace | `\(.type)` | `\(.name)`"
+              else
+                "✏️ Update | `\(.type)` | `\(.name)`"
+              end
+            ' 2>/dev/null > changes.txt || true
+          else
+            touch changes.txt
+          fi
+
+          # Count changes — avoid grep exit code 1 on no-match with wc -l
+          NEW=$(grep -F "✨ New" changes.txt | wc -l | tr -d ' ')
+          UPDATE=$(grep -F "✏️ Update" changes.txt | wc -l | tr -d ' ')
+          DESTROY=$(grep -F "💣" changes.txt | wc -l | tr -d ' ')
+          echo "new=${NEW}" >> $GITHUB_OUTPUT
+          echo "update=${UPDATE}" >> $GITHUB_OUTPUT
+          echo "destroy=${DESTROY}" >> $GITHUB_OUTPUT
+
+          # Build markdown table rows
+          TABLE=$(awk '{print "| " $0 " |"}' changes.txt)
+          echo "table<<ENDOFTABLE" >> $GITHUB_OUTPUT
+          echo "$TABLE" >> $GITHUB_OUTPUT
+          echo "ENDOFTABLE" >> $GITHUB_OUTPUT
+
+      - name: Post plan as PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const init     = '${{ steps.init.outcome }}';
+            const validate = '${{ steps.validate.outcome }}';
+            const plan     = '${{ steps.plan.outcome }}';
+            const newCount     = '${{ steps.changes.outputs.new }}';
+            const updateCount  = '${{ steps.changes.outputs.update }}';
+            const destroyCount = '${{ steps.changes.outputs.destroy }}';
+            const tableRows    = ${{ toJSON(steps.changes.outputs.table) }};
+
+            const statusLine = plan === 'success'
+              ? `✅ Plan succeeded — ✨ ${newCount} new · ✏️ ${updateCount} updated · 💣 ${destroyCount} destroyed`
+              : `❌ Plan failed`;
+
+            const changesTable = tableRows.trim()
+              ? [
+                  '## Resource Changes',
+                  '',
+                  '| Change | Type | Name |',
+                  '|--------|------|------|',
+                  tableRows,
+                ].join('\n')
+              : '_No resource changes._';
+
+            const planOutput = require('fs').existsSync('terraform/plan.txt')
+              ? require('fs').readFileSync('terraform/plan.txt', 'utf8').slice(0, 60000)
+              : '_(plan output not available)_';
+
+            const body = [
+              '## Terraform Plan',
+              '',
+              `| Step | Result |`,
+              `|------|--------|`,
+              `| Init | ${init === 'success' ? '✅' : '❌'} ${init} |`,
+              `| Validate | ${validate === 'success' ? '✅' : '❌'} ${validate} |`,
+              `| Plan | ${plan === 'success' ? '✅' : '❌'} ${plan} |`,
+              '',
+              statusLine,
+              '',
+              changesTable,
+              '',
+              '<details><summary>Full plan output</summary>',
+              '',
+              '```',
+              planOutput,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Fail if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
