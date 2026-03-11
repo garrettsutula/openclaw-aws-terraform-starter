@@ -4,6 +4,13 @@ Terraform + GitHub Actions for deploying [OpenClaw](https://github.com/openclaw/
 
 **Estimated cost:** ~$20/month (t3.small + 20GB gp3 + Elastic IP)
 
+## Prerequisites
+
+- AWS account with permissions for EC2, VPC, EIP, S3, DynamoDB, Route 53, and Budgets
+- An existing EC2 key pair for SSH access
+- A Route 53 hosted zone for your domain
+- Terraform ≥ 1.6 (for the local bootstrap step only)
+
 ## Getting Started
 
 ### 1. Bootstrap remote state (local)
