@@ -278,6 +278,26 @@ resource "aws_iam_role_policy" "openclaw_backups" {
   })
 }
 
+resource "aws_iam_role_policy" "openclaw_bedrock" {
+  name = "${var.project_name}-bedrock-inference"
+  role = aws_iam_role.openclaw_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*::foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "openclaw_ec2" {
   name = "${var.project_name}-ec2-profile"
   role = aws_iam_role.openclaw_ec2.name
