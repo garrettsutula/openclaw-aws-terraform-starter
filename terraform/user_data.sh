@@ -162,6 +162,106 @@ echo "==> Removing passwordless sudo"
 rm -f /etc/sudoers.d/openclaw
 
 # ---------------------------------------------------------------------------
+# 10. AWS CLI v2
+# ---------------------------------------------------------------------------
+echo "==> Installing AWS CLI v2"
+if ! command -v aws &>/dev/null; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  rm -rf /tmp/awscliv2.zip /tmp/aws
+fi
+
+# ---------------------------------------------------------------------------
+# 11. Automated S3 backup
+# ---------------------------------------------------------------------------
+echo "==> Setting up automated S3 backup"
+
+# Create bin dir and systemd user dir
+mkdir -p "$OPENCLAW_HOME/bin"
+mkdir -p "$OPENCLAW_HOME/.config/systemd/user"
+
+# Write backup script (${project_name} and ${name_suffix} are substituted by Terraform templatefile)
+cat > "$OPENCLAW_HOME/bin/openclaw-backup.sh" <<'BACKUP_SCRIPT'
+#!/usr/bin/env bash
+# openclaw-backup.sh — back up OpenClaw config to S3
+# Auth via EC2 IAM instance profile (no keys needed)
+# Excludes: openclaw.json (secrets), logs/, media/, workspace/ (git-tracked)
+
+set -euo pipefail
+
+BACKUP_BUCKET="${project_name}-backups-${name_suffix}"
+BACKUP_PREFIX="backups"
+OPENCLAW_DIR="/home/openclaw/.openclaw"
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H-%M-%SZ")
+ARCHIVE="/tmp/openclaw-backup-$${TIMESTAMP}.tar.gz"
+
+echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Starting OpenClaw backup..."
+
+tar -czf "$ARCHIVE" \
+  --exclude="$OPENCLAW_DIR/openclaw.json" \
+  --exclude="$OPENCLAW_DIR/logs" \
+  --exclude="$OPENCLAW_DIR/media" \
+  --exclude="$OPENCLAW_DIR/workspace" \
+  -C /home/openclaw .openclaw
+
+SIZE=$(du -sh "$ARCHIVE" | cut -f1)
+echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Archive: $ARCHIVE ($SIZE)"
+
+aws s3 cp "$ARCHIVE" "s3://$${BACKUP_BUCKET}/$${BACKUP_PREFIX}/$${TIMESTAMP}.tar.gz" \
+  --region us-east-2
+
+rm -f "$ARCHIVE"
+echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Backup complete → s3://$${BACKUP_BUCKET}/$${BACKUP_PREFIX}/$${TIMESTAMP}.tar.gz"
+BACKUP_SCRIPT
+
+chmod +x "$OPENCLAW_HOME/bin/openclaw-backup.sh"
+
+# Write systemd service unit
+cat > "$OPENCLAW_HOME/.config/systemd/user/openclaw-backup.service" <<'SERVICE_EOF'
+[Unit]
+Description=OpenClaw S3 Backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/openclaw/bin/openclaw-backup.sh
+StandardOutput=journal
+StandardError=journal
+SERVICE_EOF
+
+# Write systemd timer unit
+cat > "$OPENCLAW_HOME/.config/systemd/user/openclaw-backup.timer" <<'TIMER_EOF'
+[Unit]
+Description=OpenClaw S3 Backup — daily at 03:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER_EOF
+
+# Fix ownership
+chown -R "$OPENCLAW_USER:$OPENCLAW_USER" "$OPENCLAW_HOME/bin" "$OPENCLAW_HOME/.config"
+
+# Enable lingering so user services survive without an active login session
+loginctl enable-linger "$OPENCLAW_USER"
+sleep 2
+
+# Enable and start the timer as the openclaw user
+OPENCLAW_UID="$(id -u "$OPENCLAW_USER")"
+sudo -u "$OPENCLAW_USER" \
+  XDG_RUNTIME_DIR="/run/user/$OPENCLAW_UID" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$OPENCLAW_UID/bus" \
+  systemctl --user daemon-reload
+sudo -u "$OPENCLAW_USER" \
+  XDG_RUNTIME_DIR="/run/user/$OPENCLAW_UID" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$OPENCLAW_UID/bus" \
+  systemctl --user enable --now openclaw-backup.timer
+
+# ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 echo "==> Bootstrap complete"

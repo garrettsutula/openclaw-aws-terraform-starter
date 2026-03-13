@@ -119,7 +119,9 @@ resource "aws_instance" "openclaw" {
   ebs_optimized          = true
 
   user_data = templatefile("${path.module}/user_data.sh", {
-    domain = var.domain
+    domain       = var.domain
+    project_name = var.project_name
+    name_suffix  = var.name_suffix
   })
 
   root_block_device {
