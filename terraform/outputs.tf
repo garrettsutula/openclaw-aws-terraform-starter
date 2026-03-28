@@ -22,3 +22,8 @@ output "domain" {
   description = "Domain configured for this deployment"
   value       = var.domain
 }
+
+output "alerts_sns_topic_arn" {
+  description = "SNS topic ARN for CloudWatch alerts"
+  value       = aws_sns_topic.alerts.arn
+}

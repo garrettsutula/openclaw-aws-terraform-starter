@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # cloud-init bootstrap script — runs as root on first boot
-# Installs: ufw, fail2ban, Caddy, OpenClaw (native host install)
+# Installs: ufw, fail2ban, Caddy, OpenClaw, AWS CLI, CloudWatch Agent,
+#           gh CLI, 1Password CLI (op), Terraform
 # Hardens: SSH (key-only, no root), UFW (22/80/443), fail2ban (sshd)
 
 set -euo pipefail
@@ -162,7 +163,47 @@ echo "==> Removing passwordless sudo"
 rm -f /etc/sudoers.d/openclaw
 
 # ---------------------------------------------------------------------------
-# 10. AWS CLI v2
+# 10. Developer tooling (gh CLI, op CLI, terraform, source dir)
+# ---------------------------------------------------------------------------
+echo "==> Configuring developer tooling"
+
+# Create ~/source directory for repo clones
+mkdir -p "$OPENCLAW_HOME/source"
+chown "$OPENCLAW_USER:$OPENCLAW_USER" "$OPENCLAW_HOME/source"
+
+# gh CLI (GitHub official apt repo)
+echo "==> Installing gh CLI"
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+apt-get update -y && apt-get install -y gh
+
+# 1Password CLI (op)
+echo "==> Installing 1Password CLI"
+curl -sS https://downloads.1password.com/linux/keys/1password.asc \
+  | gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" \
+  | tee /etc/apt/sources.list.d/1password.list
+mkdir -p /etc/debsig/policies/AC2D62742012EA22
+curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol \
+  | tee /etc/debsig/policies/AC2D62742012EA22/1password.pol
+mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22
+curl -sS https://downloads.1password.com/linux/keys/1password.asc \
+  | gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg
+apt-get update -y && apt-get install -y 1password-cli
+
+# Terraform (HashiCorp apt repo)
+echo "==> Installing Terraform"
+curl -fsSL https://apt.releases.hashicorp.com/gpg \
+  | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+  | tee /etc/apt/sources.list.d/hashicorp.list
+apt-get update -y && apt-get install -y terraform
+
+# ---------------------------------------------------------------------------
+# 11. AWS CLI v2
 # ---------------------------------------------------------------------------
 echo "==> Installing AWS CLI v2"
 if ! command -v aws &>/dev/null; then
@@ -173,7 +214,50 @@ if ! command -v aws &>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
-# 11. Automated S3 backup
+# 11b. CloudWatch Agent
+# ---------------------------------------------------------------------------
+echo "==> Installing CloudWatch Agent"
+CW_PKG_URL="https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb"
+curl -fsSL "$CW_PKG_URL" -o /tmp/amazon-cloudwatch-agent.deb
+dpkg -i /tmp/amazon-cloudwatch-agent.deb
+rm /tmp/amazon-cloudwatch-agent.deb
+
+mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CW_CONFIG'
+{
+  "agent": {
+    "metrics_collection_interval": 60,
+    "run_as_user": "root"
+  },
+  "metrics": {
+    "namespace": "CWAgent",
+    "append_dimensions": {
+      "InstanceId": "$${aws:InstanceId}"
+    },
+    "metrics_collected": {
+      "disk": {
+        "measurement": ["disk_used_percent"],
+        "metrics_collection_interval": 60,
+        "resources": ["/"],
+        "ignore_file_system_types": ["sysfs", "devtmpfs"]
+      },
+      "mem": {
+        "measurement": ["mem_used_percent"],
+        "metrics_collection_interval": 60
+      }
+    }
+  }
+}
+CW_CONFIG
+
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+
+systemctl enable amazon-cloudwatch-agent
+
+# ---------------------------------------------------------------------------
+# 12. Automated S3 backup
 # ---------------------------------------------------------------------------
 echo "==> Setting up automated S3 backup"
 

@@ -89,7 +89,7 @@ resource "aws_security_group" "openclaw" {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.my_ip]
   }
 
   egress {
@@ -222,6 +222,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "openclaw_backups" {
   rule {
     id     = "expire-old-backups"
     status = "Enabled"
+    filter {}
     expiration {
       days = 30
     }
@@ -298,9 +299,123 @@ resource "aws_iam_role_policy" "openclaw_bedrock" {
   })
 }
 
+resource "aws_iam_role_policy" "openclaw_read_only" {
+  name = "${var.project_name}-read-only"
+  role = aws_iam_role.openclaw_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ec2:Describe*",
+        "iam:Get*",
+        "iam:List*",
+        "s3:Get*",
+        "s3:List*",
+        "rds:Describe*",
+        "elasticloadbalancing:Describe*",
+        "cloudwatch:Describe*",
+        "cloudwatch:Get*",
+        "cloudwatch:List*",
+        "logs:Describe*",
+        "logs:Get*",
+        "logs:List*",
+        "route53:Get*",
+        "route53:List*",
+        "acm:Describe*",
+        "acm:Get*",
+        "acm:List*",
+        "sns:Get*",
+        "sns:List*",
+        "sqs:Get*",
+        "sqs:List*",
+        "lambda:Get*",
+        "lambda:List*",
+        "dynamodb:Describe*",
+        "dynamodb:List*",
+        "dynamodb:GetItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "sts:GetCallerIdentity"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "openclaw_cloudwatch_agent" {
+  name = "${var.project_name}-cloudwatch-agent"
+  role = aws_iam_role.openclaw_ec2.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "cloudwatch:PutMetricData",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeTags",
+        "logs:PutLogEvents",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:DescribeLogStreams"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "openclaw_ssm" {
+  role       = aws_iam_role.openclaw_ec2.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy" "openclaw_cost_explorer" {
+  name = "${var.project_name}-cost-explorer"
+  role = aws_iam_role.openclaw_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "ce:GetCostAndUsage",
+        "ce:GetCostForecast",
+        "ce:GetDimensionValues",
+        "ce:GetUsageForecast",
+        "ce:ListCostAllocationTags"
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "openclaw_ec2" {
   name = "${var.project_name}-ec2-profile"
   role = aws_iam_role.openclaw_ec2.name
+}
+
+# ---------------------------------------------------------------------------
+# SSH Key Pair — imported from existing key
+# ---------------------------------------------------------------------------
+
+# The openclaw-ssh key pair is imported from an existing key.
+# Set the openclaw_ssh_public_key variable in your tfvars file with the
+# content of your public key file (e.g., ~/.ssh/openclaw-ssh.pub)
+resource "aws_key_pair" "openclaw_ssh" {
+  key_name   = "openclaw-ssh"
+  public_key = var.openclaw_ssh_public_key
+
+  # AWS does not return the public key material on import, so Terraform will
+  # always see a diff and attempt destroy+recreate. Ignore it after import.
+  lifecycle {
+    ignore_changes = [public_key]
+  }
+
+  tags = {
+    Name    = "openclaw-ssh"
+    Project = "openclaw"
+  }
 }
 
 

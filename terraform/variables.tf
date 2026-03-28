@@ -51,3 +51,9 @@ variable "budget_limit_usd" {
   type        = number
   default     = 25
 }
+
+variable "openclaw_ssh_public_key" {
+  description = "Public key content for the openclaw-ssh key pair. Set this in your tfvars file with the content of your ~/.ssh/openclaw-ssh.pub file."
+  type        = string
+  sensitive   = true
+}
