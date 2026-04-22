@@ -119,7 +119,7 @@ resource "aws_cloudwatch_metric_alarm" "network_in_anomaly" {
       namespace   = "AWS/EC2"
       period      = 600
       stat        = "Average"
-      dimensions  = {
+      dimensions = {
         InstanceId = aws_instance.openclaw.id
       }
     }
@@ -157,7 +157,7 @@ resource "aws_cloudwatch_metric_alarm" "network_out_anomaly" {
       namespace   = "AWS/EC2"
       period      = 600
       stat        = "Average"
-      dimensions  = {
+      dimensions = {
         InstanceId = aws_instance.openclaw.id
       }
     }
