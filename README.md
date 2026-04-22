@@ -65,7 +65,7 @@ Internet
 AWS Security Group
     ├── Port 22  (SSH)   — operator IP only
     ├── Port 80  (HTTP)  — 0.0.0.0/0 (ACME challenge redirect)
-    └── Port 443 (HTTPS) — 0.0.0.0/0
+    └── Port 443 (HTTPS) — operator IP only
          │
          ▼
     EC2 t3.small — Ubuntu 24.04 LTS
