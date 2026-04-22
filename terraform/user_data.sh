@@ -292,8 +292,7 @@ tar -czf "$ARCHIVE" \
 SIZE=$(du -sh "$ARCHIVE" | cut -f1)
 echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Archive: $ARCHIVE ($SIZE)"
 
-aws s3 cp "$ARCHIVE" "s3://$${BACKUP_BUCKET}/$${BACKUP_PREFIX}/$${TIMESTAMP}.tar.gz" \
-  --region us-east-2
+aws s3 cp "$ARCHIVE" "s3://$${BACKUP_BUCKET}/$${BACKUP_PREFIX}/$${TIMESTAMP}.tar.gz"
 
 rm -f "$ARCHIVE"
 echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Backup complete → s3://$${BACKUP_BUCKET}/$${BACKUP_PREFIX}/$${TIMESTAMP}.tar.gz"

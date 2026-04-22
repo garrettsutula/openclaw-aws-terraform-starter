@@ -113,7 +113,7 @@ resource "aws_instance" "openclaw" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   key_name               = var.key_name
-  subnet_id              = tolist(data.aws_subnets.default.ids)[0]
+  subnet_id              = tolist(sort(data.aws_subnets.default.ids))[0]
   vpc_security_group_ids = [aws_security_group.openclaw.id]
   iam_instance_profile   = aws_iam_instance_profile.openclaw_ec2.name
   ebs_optimized          = true
@@ -237,6 +237,12 @@ resource "aws_s3_bucket_public_access_block" "openclaw_backups" {
   restrict_public_buckets = true
 }
 
+# CloudWatch metrics for backup monitoring — enables NumberOfObjects and TotalSize metrics
+resource "aws_s3_bucket_metric" "openclaw_backups" {
+  bucket = aws_s3_bucket.openclaw_backups.id
+  name   = "EntireBucket"
+}
+
 # ---------------------------------------------------------------------------
 # IAM role + instance profile for EC2 → S3 backup access
 # ---------------------------------------------------------------------------
@@ -279,71 +285,7 @@ resource "aws_iam_role_policy" "openclaw_backups" {
   })
 }
 
-resource "aws_iam_role_policy" "openclaw_bedrock" {
-  name = "${var.project_name}-bedrock-inference"
-  role = aws_iam_role.openclaw_ec2.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
-      ]
-      Resource = [
-        "arn:aws:bedrock:*::foundation-model/*",
-        "arn:aws:bedrock:*:*:inference-profile/*"
-      ]
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "openclaw_read_only" {
-  name = "${var.project_name}-read-only"
-  role = aws_iam_role.openclaw_ec2.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "ec2:Describe*",
-        "iam:Get*",
-        "iam:List*",
-        "s3:Get*",
-        "s3:List*",
-        "rds:Describe*",
-        "elasticloadbalancing:Describe*",
-        "cloudwatch:Describe*",
-        "cloudwatch:Get*",
-        "cloudwatch:List*",
-        "logs:Describe*",
-        "logs:Get*",
-        "logs:List*",
-        "route53:Get*",
-        "route53:List*",
-        "acm:Describe*",
-        "acm:Get*",
-        "acm:List*",
-        "sns:Get*",
-        "sns:List*",
-        "sqs:Get*",
-        "sqs:List*",
-        "lambda:Get*",
-        "lambda:List*",
-        "dynamodb:Describe*",
-        "dynamodb:List*",
-        "dynamodb:GetItem",
-        "dynamodb:Query",
-        "dynamodb:Scan",
-        "sts:GetCallerIdentity"
-      ]
-      Resource = "*"
-    }]
-  })
-}
-
+# Scoped to the specific backup bucket only
 resource "aws_iam_role_policy" "openclaw_cloudwatch_agent" {
   name = "${var.project_name}-cloudwatch-agent"
   role = aws_iam_role.openclaw_ec2.id
@@ -354,11 +296,7 @@ resource "aws_iam_role_policy" "openclaw_cloudwatch_agent" {
       Action = [
         "cloudwatch:PutMetricData",
         "ec2:DescribeVolumes",
-        "ec2:DescribeTags",
-        "logs:PutLogEvents",
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:DescribeLogStreams"
+        "ec2:DescribeTags"
       ]
       Resource = "*"
     }]
@@ -368,26 +306,6 @@ resource "aws_iam_role_policy" "openclaw_cloudwatch_agent" {
 resource "aws_iam_role_policy_attachment" "openclaw_ssm" {
   role       = aws_iam_role.openclaw_ec2.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_role_policy" "openclaw_cost_explorer" {
-  name = "${var.project_name}-cost-explorer"
-  role = aws_iam_role.openclaw_ec2.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "ce:GetCostAndUsage",
-        "ce:GetCostForecast",
-        "ce:GetDimensionValues",
-        "ce:GetUsageForecast",
-        "ce:ListCostAllocationTags"
-      ]
-      Resource = "*"
-    }]
-  })
 }
 
 resource "aws_iam_instance_profile" "openclaw_ec2" {

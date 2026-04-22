@@ -18,6 +18,9 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 }
 
 # Disk alarm (CWAgent namespace, fires at >= 70%)
+# Note: device dimension intentionally omitted — disk_used_percent is per-path,
+# and device names (e.g. nvme0n1p1) vary across instance types and OS versions.
+# Including it would cause false negatives on non-matching device names.
 resource "aws_cloudwatch_metric_alarm" "disk_used" {
   alarm_name          = "${var.project_name}-disk-used-high"
   comparison_operator = "GreaterThanOrEqualToThreshold"
@@ -35,7 +38,28 @@ resource "aws_cloudwatch_metric_alarm" "disk_used" {
     InstanceId = aws_instance.openclaw.id
     path       = "/"
     fstype     = "ext4"
-    device     = "nvme0n1p1"
+  }
+  tags = {
+    Project = "openclaw"
+  }
+}
+
+# Memory alarm (CWAgent namespace, fires at >= 80%)
+resource "aws_cloudwatch_metric_alarm" "memory_high" {
+  alarm_name          = "${var.project_name}-memory-high"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 3
+  metric_name         = "mem_used_percent"
+  namespace           = "CWAgent"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "Memory >= 80% sustained for 15 minutes"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+  dimensions = {
+    InstanceId = aws_instance.openclaw.id
   }
   tags = {
     Project = "openclaw"
@@ -137,5 +161,30 @@ resource "aws_cloudwatch_metric_alarm" "network_out_anomaly" {
         InstanceId = aws_instance.openclaw.id
       }
     }
+  }
+}
+
+# Backup failure alarm — fires if no new backup object appears within 27 hours (3h timer + margin)
+# Uses the S3 bucket metric NumberOfObjects as a proxy: if the count drops or is stale,
+# the backup script likely failed or the timer didn't fire.
+resource "aws_cloudwatch_metric_alarm" "backup_failure" {
+  alarm_name          = "${var.project_name}-backup-missing"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "NumberOfObjects"
+  namespace           = "AWS/S3"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 1
+  alarm_description   = "No backup objects found in S3 — backup may have failed or timer may not have fired"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "breaching"
+  dimensions = {
+    BucketName = aws_s3_bucket.openclaw_backups.id
+    MetricType = "NumberOfObjects"
+  }
+  tags = {
+    Project = "openclaw"
   }
 }
