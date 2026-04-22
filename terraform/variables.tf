@@ -13,6 +13,10 @@ variable "instance_type" {
 variable "my_ip" {
   description = "Your public IP in CIDR notation (e.g. 1.2.3.4/32) — used to allowlist SSH"
   type        = string
+  validation {
+    condition     = can(cidrhost(var.my_ip, 0))
+    error_message = "my_ip must be a valid CIDR notation IP address (e.g. 1.2.3.4/32)."
+  }
 }
 
 variable "key_name" {

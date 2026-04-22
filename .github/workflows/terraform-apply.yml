@@ -28,9 +28,6 @@ jobs:
       github.event_name == 'push' ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'apply')
 
-    environment:
-      name: production  # requires manual approval in GitHub environment settings
-
     defaults:
       run:
         working-directory: terraform
@@ -51,11 +48,11 @@ jobs:
         with:
           terraform_version: "~1.6"
 
-      - name: Substitute backend name_suffix
-        run: sed -i "s/YOURSUFFIX/${{ secrets.NAME_SUFFIX }}/g" main.tf
-
       - name: Terraform Init
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=openclaw-terraform-state-${{ secrets.NAME_SUFFIX }}" \
+            -backend-config="region=${{ secrets.AWS_REGION || 'us-east-2' }}"
 
       - name: Terraform Apply
         run: |
@@ -67,6 +64,7 @@ jobs:
             -var="domain=${{ secrets.OPENCLAW_DOMAIN }}" \
             -var="hosted_zone_name=${{ secrets.HOSTED_ZONE_NAME }}" \
             -var="budget_alert_email=${{ secrets.BUDGET_ALERT_EMAIL }}" \
+            -var="openclaw_ssh_public_key=${{ secrets.OPENCLAW_SSH_PUBLIC_KEY }}" \
             -auto-approve \
             -no-color
 

@@ -37,7 +37,7 @@ variable "bucket_name" {
 }
 
 locals {
-  bucket = local.bucket
+  bucket = var.bucket_name != "" ? var.bucket_name : "${var.project_name}-terraform-state-${var.name_suffix}"
 }
 
 resource "aws_s3_bucket" "tfstate" {
@@ -49,7 +49,7 @@ resource "aws_s3_bucket" "tfstate" {
 
   tags = {
     Name    = local.bucket
-    Project = "openclaw"
+    Project = var.project_name
   }
 }
 
