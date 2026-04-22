@@ -164,9 +164,10 @@ resource "aws_cloudwatch_metric_alarm" "network_out_anomaly" {
   }
 }
 
-# Backup failure alarm — fires if no new backup object appears within 27 hours (3h timer + margin)
-# Uses the S3 bucket metric NumberOfObjects as a proxy: if the count drops or is stale,
-# the backup script likely failed or the timer didn't fire.
+# Backup failure alarm — fires if the backup script fails or the S3 upload does not occur.
+# Uses S3 prefix metric: fires when the NumberOfObjects in the backups/ prefix is
+# less than 1 for 25+ minutes (5-min period × 1 eval). The backup script writes to
+# s3://<bucket>/backups/<timestamp>.tar.gz; if that file is missing, the alarm fires.
 resource "aws_cloudwatch_metric_alarm" "backup_failure" {
   alarm_name          = "${var.project_name}-backup-missing"
   comparison_operator = "LessThanThreshold"
@@ -176,7 +177,7 @@ resource "aws_cloudwatch_metric_alarm" "backup_failure" {
   period              = 300
   statistic           = "Average"
   threshold           = 1
-  alarm_description   = "No backup objects found in S3 — backup may have failed or timer may not have fired"
+  alarm_description   = "No backup objects found in s3://${aws_s3_bucket.openclaw_backups.id}/backups/ — backup may have failed or timer did not fire"
   alarm_actions       = [aws_sns_topic.alerts.arn]
   ok_actions          = [aws_sns_topic.alerts.arn]
   treat_missing_data  = "breaching"

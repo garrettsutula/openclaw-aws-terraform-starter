@@ -9,9 +9,9 @@ terraform {
   }
 
   # ⚠️  Backend blocks do not support variable interpolation.
-  # In CI, the pipeline substitutes YOURSUFFIX with the NAME_SUFFIX secret via sed before terraform init.
-  # For local runs, manually replace YOURSUFFIX with your name_suffix value before running terraform init.
-  # The bucket name must match the one created by terraform/bootstrap: "<project_name>-terraform-state-<name_suffix>"
+  # In CI, the bucket is overridden via -backend-config flags (see workflow files).
+  # For local runs, either edit this block directly or use a .tfbackend file.
+  # The bucket name must match: "<project_name>-terraform-state-<name_suffix>"
   backend "s3" {
     bucket         = "openclaw-terraform-state-YOURSUFFIX"
     key            = "openclaw/terraform.tfstate"
